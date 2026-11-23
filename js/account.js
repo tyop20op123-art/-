@@ -1,20 +1,17 @@
-// חשבונות משתמשים: כניסה עם Google או אימייל, וסנכרון השמורים/ההעדפות/ההיסטוריה ל-Firestore.
-// נטען רק אם הוגדר window.FIREBASE_CONFIG (ראו js/firebase-config.js).
-const cfg = window.FIREBASE_CONFIG;
-const FB = "https://www.gstatic.com/firebasejs/10.12.2";
+// חשבונות משתמשים (Supabase): כניסה עם אימייל (ואופציונלית Google),
+// וסנכרון השמורים/ההעדפות/ההיסטוריה לטבלה user_data.
+// נטען רק אם הוגדר window.SUPABASE_CONFIG (ראו js/backend-config.js).
+const cfg = window.SUPABASE_CONFIG;
+const SB_URL = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm";
 
-if (cfg) start().catch((e) => console.warn("[account] disabled:", e));
+if (cfg && cfg.url && cfg.key) start().catch((e) => console.warn("[account] disabled:", e));
 
 async function start() {
-  const [{ initializeApp }, A, F] = await Promise.all([
-    import(`${FB}/firebase-app.js`), import(`${FB}/firebase-auth.js`), import(`${FB}/firebase-firestore.js`)
-  ]);
+  const { createClient } = await import(SB_URL);
   if (!window.Tovana) await new Promise((r) => addEventListener("tovana:ready", r, { once: true }));
   const T = window.Tovana;
-  const app = initializeApp(cfg);
-  const auth = A.getAuth(app);
-  auth.languageCode = "he";
-  const db = F.getFirestore(app);
+  const sb = createClient(cfg.url, cfg.key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+  const here = location.origin + location.pathname;
 
   const btn = document.getElementById("accountBtn");
   const avatar = document.getElementById("accountAvatar");
@@ -24,11 +21,10 @@ async function start() {
   const LS = (k) => `tovana:sync:${k}`;
   const getLS = (k) => { try { return localStorage.getItem(LS(k)); } catch { return null; } };
   const setLS = (k, v) => { try { localStorage.setItem(LS(k), v); } catch {} };
-  const ref = () => F.doc(db, "users", user.uid);
 
   /* ── מיזוג: איחוד חכם בין המכשיר לחשבון ── */
   function merge(local, remote) {
-    const saved = { ...remote.saved };
+    const saved = { ...(remote.saved || {}) };
     for (const [id, c] of Object.entries(local.saved || {})) {
       if (!saved[id] || (c.savedAt || 0) > (saved[id].savedAt || 0)) saved[id] = c;
     }
@@ -51,139 +47,144 @@ async function start() {
   async function push() {
     if (!user) return;
     const now = Date.now();
-    try {
-      await F.setDoc(ref(), { ...T.getData(), updatedAt: now });
-      setLS(user.uid, String(now));
-    } catch (e) { console.warn("[account] push failed", e); }
+    const { error } = await sb.from("user_data").upsert({ user_id: user.id, data: T.getData(), updated_at: now });
+    if (error) return console.warn("[account] push failed", error);
+    setLS(user.id, String(now));
   }
   const schedulePush = () => { if (applying || !user) return; clearTimeout(pushT); pushT = setTimeout(push, 1500); };
   addEventListener("tovana:change", schedulePush);
 
-  // משיכה מהחשבון: בכניסה ראשונה – איחוד; אחר כך – אם בחשבון יש גרסה חדשה יותר (ממכשיר אחר), היא קובעת
+  // משיכה מהחשבון: בכניסה ראשונה במכשיר – איחוד; אחר כך – גרסה חדשה יותר בחשבון (ממכשיר אחר) קובעת
   async function pull(firstTime) {
     if (!user) return;
-    let snap;
-    try { snap = await F.getDoc(ref()); } catch (e) { console.warn("[account] pull failed", e); return; }
-    const local = T.getData();
-    applying = true;
-    if (!snap.exists()) { applying = false; return push(); }
-    const remote = snap.data();
-    const lastSync = Number(getLS(user.uid) || 0);
-    let data;
-    if (firstTime && !lastSync) data = merge(local, remote);
-    else if ((remote.updatedAt || 0) > lastSync) data = { ...merge(local, remote), saved: remote.saved || {}, liked: remote.liked || [], favs: remote.favs || [], goal: remote.goal || local.goal };
-    else { applying = false; return; }
-    T.setData(data);
-    applying = false;
-    setLS(user.uid, String(remote.updatedAt || Date.now()));
+    const { data: row, error } = await sb.from("user_data").select("data, updated_at").eq("user_id", user.id).maybeSingle();
+    if (error) return console.warn("[account] pull failed", error);
+    if (!row) return push();
+    const local = T.getData(), remote = row.data || {};
+    const lastSync = Number(getLS(user.id) || 0);
+    let merged;
+    if (firstTime && !lastSync) merged = merge(local, remote);
+    else if ((row.updated_at || 0) > lastSync) merged = { ...merge(local, remote), saved: remote.saved || {}, liked: remote.liked || [], favs: remote.favs || [], goal: remote.goal || local.goal };
+    else return;
+    applying = true; T.setData(merged); applying = false;
+    setLS(user.id, String(row.updated_at || Date.now()));
     if (firstTime) push();
   }
 
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") pull(false); });
 
-  A.getRedirectResult(auth).catch((e) => e && T.toast(errText(e)));
-  A.onAuthStateChanged(auth, async (u) => {
+  sb.auth.onAuthStateChange((event, session) => {
+    const u = session?.user || null;
     const wasIn = !!user;
     user = u;
     renderButton();
-    if (u) { await pull(true); if (!wasIn) T.toast(`שלום ${u.displayName || u.email} – השמורים שלך מסונכרנים ☁️`); }
+    if (event === "PASSWORD_RECOVERY") return openNewPassword();
+    if (u && !wasIn) {
+      // יוצאים מתוך הקריאה של onAuthStateChange לפני שקוראים שוב ל-Supabase
+      setTimeout(async () => { await pull(true); if (event === "SIGNED_IN") T.toast(`שלום ${u.email} – השמורים שלך מסונכרנים ☁️`); }, 0);
+    }
   });
 
   function renderButton() {
-    if (user) {
-      const ch = (user.displayName || user.email || "?").trim()[0].toUpperCase();
-      avatar.textContent = ch; avatar.hidden = false;
-      if (user.photoURL) { avatar.style.backgroundImage = `url("${user.photoURL}")`; avatar.textContent = ""; }
-    } else { avatar.hidden = true; avatar.style.backgroundImage = ""; }
+    if (user) { avatar.textContent = (user.email || "?")[0].toUpperCase(); avatar.hidden = false; }
+    else avatar.hidden = true;
     btn.title = user ? `מחובר: ${user.email || ""}` : "כניסה לחשבון";
   }
 
-  const HE_ERR = {
-    "auth/invalid-email": "כתובת האימייל לא תקינה.",
-    "auth/missing-password": "צריך להקליד סיסמה.",
-    "auth/weak-password": "הסיסמה קצרה מדי – לפחות 6 תווים.",
-    "auth/email-already-in-use": "כבר יש חשבון עם האימייל הזה. נסו 'כניסה'.",
-    "auth/invalid-credential": "האימייל או הסיסמה לא נכונים.",
-    "auth/wrong-password": "הסיסמה לא נכונה.",
-    "auth/user-not-found": "אין חשבון עם האימייל הזה. נסו 'הרשמה'.",
-    "auth/too-many-requests": "יותר מדי ניסיונות. נסו שוב בעוד כמה דקות.",
-    "auth/network-request-failed": "אין חיבור לאינטרנט.",
-    "auth/unauthorized-domain": "האתר הזה עוד לא אושר ב-Firebase (Authorized domains).",
-    "auth/popup-closed-by-user": "חלון הכניסה נסגר."
+  const errText = (e) => {
+    const m = (e?.message || "").toLowerCase(), c = e?.code || "";
+    if (c === "invalid_credentials" || m.includes("invalid login")) return "האימייל או הסיסמה לא נכונים.";
+    if (c === "email_not_confirmed" || m.includes("not confirmed")) return "צריך לאשר את האימייל: פתחו את המייל ששלחנו ולחצו על הקישור.";
+    if (c === "user_already_exists" || m.includes("already registered")) return "כבר יש חשבון עם האימייל הזה. נסו 'כניסה'.";
+    if (c === "weak_password" || m.includes("password should be")) return "הסיסמה קצרה מדי – לפחות 6 תווים.";
+    if (c === "email_address_invalid" || m.includes("invalid format") || m.includes("unable to validate email")) return "כתובת האימייל לא תקינה.";
+    if (c === "over_email_send_rate_limit" || m.includes("rate limit")) return "נשלחו יותר מדי מיילים. נסו שוב בעוד כמה דקות.";
+    if (m.includes("failed to fetch") || m.includes("network")) return "אין חיבור לאינטרנט.";
+    return "משהו השתבש. נסו שוב.";
   };
-  const errText = (e) => HE_ERR[e?.code]
-    || (/api-key|configuration-not-found|operation-not-allowed/.test(e?.code || "") ? "החשבונות עוד לא הוגדרו נכון ב-Firebase (ראו js/firebase-config.js)." : "משהו השתבש. נסו שוב.");
-
-  async function googleSignIn() {
-    const provider = new A.GoogleAuthProvider();
-    const standalone = matchMedia("(display-mode: standalone)").matches;
-    try {
-      if (standalone) return await A.signInWithRedirect(auth, provider);
-      await A.signInWithPopup(auth, provider);
-      T.closeSheet();
-    } catch (e) {
-      if (e.code === "auth/popup-blocked" || e.code === "auth/operation-not-supported-in-this-environment") return A.signInWithRedirect(auth, provider);
-      T.toast(errText(e));
-    }
-  }
 
   function openAccount() {
     if (user) {
       const n = Object.keys(T.getData().saved).length;
       T.openSheet("החשבון שלי", `
         <div class="acct-head">
-          <span class="avatar big" ${user.photoURL ? `style="background-image:url('${user.photoURL}')"` : ""}>${user.photoURL ? "" : (user.displayName || user.email || "?")[0].toUpperCase()}</span>
-          <div><div class="acct-name">${esc(user.displayName || "")}</div><div class="mini-src">${esc(user.email || "")}</div></div>
+          <span class="avatar big">${esc((user.email || "?")[0].toUpperCase())}</span>
+          <div><div class="acct-name">${esc(user.email || "")}</div><div class="mini-src">מחובר ☁️</div></div>
         </div>
-        <p class="deep-text">☁️ ${n} תובנות שמורות מסונכרנות לחשבון. הן יופיעו בכל מכשיר שבו תתחברו.</p>
+        <p class="deep-text">${n} תובנות שמורות מסונכרנות לחשבון. הן יופיעו בכל מכשיר שבו תתחברו.</p>
         <div class="links"><button class="link-btn" id="acctSync">סנכרון עכשיו</button><button class="link-btn" id="acctOut">התנתקות</button></div>
         <p class="note">אחרי התנתקות, מה שכבר במכשיר נשאר בו, והחשבון שומר את הכול.</p>`, (b) => {
-        b.querySelector("#acctOut").onclick = async () => { await A.signOut(auth); T.closeSheet(); T.toast("התנתקת"); };
+        b.querySelector("#acctOut").onclick = async () => { await sb.auth.signOut(); T.closeSheet(); T.toast("התנתקת"); };
         b.querySelector("#acctSync").onclick = async () => { await push(); await pull(false); T.toast("סונכרן ✓"); };
       });
       return;
     }
     T.openSheet("כניסה לחשבון", `
       <p class="deep-text" style="margin-top:0">התחברו כדי לשמור את התובנות שלכם בחשבון ולראות אותן בכל מכשיר.</p>
-      <button class="google-btn" id="gBtn">
-        <svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3 0 5.8 1.1 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
-        המשך עם Google
-      </button>
-      <div class="or"><span>או עם אימייל</span></div>
+      ${cfg.google ? `<button class="google-btn" id="gBtn">המשך עם Google</button><div class="or"><span>או עם אימייל</span></div>` : ""}
       <form id="emailForm" class="acct-form" novalidate>
         <label for="acctEmail">אימייל</label>
         <input id="acctEmail" type="email" autocomplete="email" dir="ltr" required />
         <label for="acctPass">סיסמה</label>
         <input id="acctPass" type="password" autocomplete="current-password" dir="ltr" minlength="6" required />
         <p class="form-err" id="acctErr" role="alert" hidden></p>
+        <p class="form-ok" id="acctOk" role="status" hidden></p>
         <div class="links">
           <button class="link-btn primary" type="submit" data-mode="in">כניסה</button>
           <button class="link-btn" type="submit" data-mode="up">הרשמה</button>
           <button class="link-btn ghost" type="button" id="acctReset">שכחתי סיסמה</button>
         </div>
       </form>`, (b) => {
-      b.querySelector("#gBtn").onclick = googleSignIn;
-      const form = b.querySelector("#emailForm"), err = b.querySelector("#acctErr");
-      const show = (m) => { err.textContent = m; err.hidden = !m; };
+      const gb = b.querySelector("#gBtn");
+      if (gb) gb.onclick = () => sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: here } });
+      const form = b.querySelector("#emailForm"), err = b.querySelector("#acctErr"), ok = b.querySelector("#acctOk");
+      const show = (m, good) => { err.hidden = true; ok.hidden = true; const el = good ? ok : err; el.textContent = m || ""; el.hidden = !m; };
       let mode = "in";
       form.querySelectorAll("[data-mode]").forEach((x) => x.addEventListener("click", () => (mode = x.dataset.mode)));
       form.addEventListener("submit", async (e) => {
         e.preventDefault(); show("");
-        const email = b.querySelector("#acctEmail").value.trim(), pass = b.querySelector("#acctPass").value;
-        try {
-          if (mode === "up") await A.createUserWithEmailAndPassword(auth, email, pass);
-          else await A.signInWithEmailAndPassword(auth, email, pass);
+        const email = b.querySelector("#acctEmail").value.trim(), password = b.querySelector("#acctPass").value;
+        if (!email || !password) return show("צריך למלא אימייל וסיסמה.");
+        if (mode === "up") {
+          const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: here } });
+          if (error) return show(errText(error));
+          if (!data.session) return show("נשלח אליכם מייל אישור 📬 לחצו על הקישור שבו, ואז חזרו לכאן ולחצו 'כניסה'.", true);
           T.closeSheet();
-        } catch (ex) { show(errText(ex)); }
+        } else {
+          const { error } = await sb.auth.signInWithPassword({ email, password });
+          if (error) return show(errText(error));
+          T.closeSheet();
+        }
       });
       b.querySelector("#acctReset").onclick = async () => {
         const email = b.querySelector("#acctEmail").value.trim();
         if (!email) return show("הקלידו קודם את האימייל, ואז לחצו 'שכחתי סיסמה'.");
-        try { await A.sendPasswordResetEmail(auth, email); show(""); T.toast("נשלח אימייל לאיפוס סיסמה 📬"); }
-        catch (ex) { show(errText(ex)); }
+        const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: here });
+        if (error) return show(errText(error));
+        show("נשלח מייל לאיפוס סיסמה 📬", true);
       };
     });
   }
+
+  // אחרי לחיצה על קישור איפוס סיסמה מהמייל
+  function openNewPassword() {
+    T.openSheet("סיסמה חדשה", `
+      <form id="npForm" class="acct-form" novalidate>
+        <label for="npPass">סיסמה חדשה</label>
+        <input id="npPass" type="password" autocomplete="new-password" dir="ltr" minlength="6" required />
+        <p class="form-err" id="npErr" role="alert" hidden></p>
+        <div class="links"><button class="link-btn primary" type="submit">שמירה</button></div>
+      </form>`, (b) => {
+      b.querySelector("#npForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const { error } = await sb.auth.updateUser({ password: b.querySelector("#npPass").value });
+        const er = b.querySelector("#npErr");
+        if (error) { er.textContent = errText(error); er.hidden = false; return; }
+        T.closeSheet(); T.toast("הסיסמה עודכנה ✓");
+      });
+    });
+  }
+
   btn.onclick = openAccount;
 }
 

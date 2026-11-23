@@ -1,9 +1,9 @@
 // Service worker: האפליקציה עובדת גם בלי רשת.
 // קבצי האפליקציה – מהמטמון (ומתעדכנים ברקע). בקשות למקורות חיים – ישר לרשת.
-const VERSION = "tovana-v4"; // להעלות בכל עדכון תוכן, כדי שמכשירים מותקנים יתעדכנו
+const VERSION = "tovana-v5"; // להעלות בכל עדכון תוכן, כדי שמכשירים מותקנים יתעדכנו
 const SHELL = [
   "./", "./index.html", "./manifest.webmanifest",
-  "./css/styles.css", "./js/seed.js", "./js/seed-emunah.js","./js/sources.js", "./js/app.js", "./js/firebase-config.js", "./js/account.js", "./data/pack.json",
+  "./css/styles.css", "./js/seed.js", "./js/seed-emunah.js","./js/sources.js", "./js/app.js", "./js/backend-config.js", "./js/account.js", "./data/pack.json",
   "./icons/icon-192.png", "./icons/icon-512.png", "./icons/maskable-512.png", "./icons/apple-touch-icon.png"
 ];
 

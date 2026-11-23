@@ -356,3 +356,4 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 .form-err { color: #f87171; font-size: 14px; margin: 6px 0 0; }
 .link-btn { background: none; cursor: pointer; font: inherit; font-size: 14px; }
 .link-btn.ghost { border-color: transparent; color: var(--muted); }
+.form-ok { color: var(--c-biology); font-size: 14px; margin: 6px 0 0; line-height: 1.6; }
