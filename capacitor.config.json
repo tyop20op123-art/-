@@ -1,0 +1,9 @@
+{
+  "appId": "com.tovana.app",
+  "appName": "תובנה",
+  "webDir": "www",
+  "backgroundColor": "#0d0e11",
+  "android": {
+    "allowMixedContent": false
+  }
+}

@@ -10,6 +10,13 @@
 - חשבון (Google או אימייל) שמסנכרן את השמורים בין מכשירים
 - ניתנת להתקנה בטלפון (PWA) ועובדת אופליין
 
+## 📱 הורדת האפליקציה לאנדרואיד
+
+**[⬇️ הורדת tovana.apk](https://github.com/tyop20op123-art/-/releases/latest/download/tovana.apk)**
+
+פותחים את הקובץ בטלפון ומאשרים "התקנה ממקורות לא ידועים".
+הקובץ נבנה מחדש אוטומטית בכל עדכון (`.github/workflows/android.yml`).
+
 ## הפעלה כאתר (GitHub Pages)
 
 1. ב-GitHub: **Settings ← Pages ← Source: Deploy from a branch ← main / (root) ← Save**.
