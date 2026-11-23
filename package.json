@@ -1,0 +1,16 @@
+{
+  "name": "tovana-insight-feed",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "פיד כרטיסיות ידע בעברית בגלילה אנכית",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "latest"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,7 @@
+node_modules/
+.claude/
+tovana-app/
+tovana-app.zip
+app.html
+.DS_Store
+Thumbs.db
