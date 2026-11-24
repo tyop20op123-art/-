@@ -186,6 +186,14 @@ async function start() {
   }
 
   btn.onclick = openAccount;
+
+  // ממשק לשאר האפליקציה (סקירת AI צריכה טוקן של משתמש מחובר)
+  window.TovanaAuth = {
+    async getToken() { const { data } = await sb.auth.getSession(); return data.session?.access_token || null; },
+    openLogin: openAccount,
+    fnUrl: (name) => `${cfg.url}/functions/v1/${name}`,
+    key: cfg.key
+  };
 }
 
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m])); }

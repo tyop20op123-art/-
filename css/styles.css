@@ -357,3 +357,35 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 .link-btn { background: none; cursor: pointer; font: inherit; font-size: 14px; }
 .link-btn.ghost { border-color: transparent; color: var(--muted); }
 .form-ok { color: var(--c-biology); font-size: 14px; margin: 6px 0 0; line-height: 1.6; }
+
+/* ───────── סקירת AI ───────── */
+.ai-box {
+  position: relative; margin: 4px 0 6px; padding: 16px; border-radius: 16px;
+  background:
+    linear-gradient(var(--surface), var(--surface)) padding-box,
+    linear-gradient(120deg, color-mix(in srgb, var(--gold) 80%, transparent), color-mix(in srgb, var(--c-philosophy) 70%, transparent), color-mix(in srgb, var(--c-physics) 70%, transparent)) border-box;
+  border: 1.5px solid transparent;
+}
+.ai-btn {
+  display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 12px;
+  font-size: 15.5px; font-weight: 600; color: #111;
+  background: linear-gradient(120deg, var(--gold), color-mix(in srgb, var(--gold) 55%, #fff));
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--gold) 30%, transparent);
+  transition: transform .15s var(--ease), box-shadow .2s;
+}
+.ai-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 26px color-mix(in srgb, var(--gold) 40%, transparent); }
+.ai-btn:active { transform: scale(.97); }
+.ai-spark { display: inline-block; font-size: 1.05em; }
+.ai-spark.spin { animation: spin 1.4s linear infinite; color: var(--gold); }
+.ai-hint { margin: 10px 0 0; font-size: 13.5px; color: var(--muted); line-height: 1.6; }
+.ai-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; letter-spacing: .02em; color: var(--gold); margin-bottom: 10px; }
+.ai-one { font-family: "Frank Ruhl Libre", serif; font-size: 20px; line-height: 1.45; margin: 0 0 10px; color: var(--text); text-wrap: balance; }
+.ai-p { margin: 0 0 10px; font-size: 16px; line-height: 1.8; color: var(--text-2); }
+.ai-sub { font-size: 13px; font-weight: 600; color: var(--text); margin: 14px 0 4px; }
+.ai-terms { margin: 0; display: grid; gap: 6px; }
+.ai-terms dt { font-weight: 600; font-size: 14.5px; }
+.ai-terms dd { margin: 0 0 4px; font-size: 14.5px; color: var(--text-2); line-height: 1.6; }
+.ai-note { margin: 12px 0 0; font-size: 12px; color: var(--muted); }
+@keyframes spin { to { transform: rotate(360deg); } }
+[hidden] { display: none !important; }
+.act.ai .circle { color: #111; border-color: transparent; background: linear-gradient(135deg, var(--gold), color-mix(in srgb, var(--gold) 50%, #fff)); font-size: 20px; }

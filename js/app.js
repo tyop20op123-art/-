@@ -169,6 +169,7 @@
           <button class="act like ${state.liked.has(c.id) ? "on" : ""}" data-act="like" aria-pressed="${state.liked.has(c.id)}" aria-label="תובנה חזקה"><span class="circle">${ICON.heart}</span><span class="lbl">חזק!</span></button>
           <button class="act" data-act="share" aria-label="שיתוף"><span class="circle">${ICON.share}</span><span class="lbl">שיתוף</span></button>
           <button class="act deep" data-act="deep" aria-label="העמק עוד"><span class="circle">${ICON.deep}</span><span class="lbl">העמק</span></button>
+          ${window.SUPABASE_CONFIG ? `<button class="act ai" data-act="ai" aria-label="סקירת AI: הסבר פשוט"><span class="circle">✦</span><span class="lbl">הסבר AI</span></button>` : ""}
         </aside>
       </div>
       <span class="read-check">✓ נקרא</span>
@@ -375,6 +376,10 @@
       } catch (e) { if (e.name !== "AbortError") toast("לא ניתן לשתף כרגע"); }
     } else if (kind === "deep") openDeep(c);
     else if (kind === "book") openBook(c);
+    else if (kind === "ai") {
+      if (!window.TovanaAuth) return toast("סקירת AI זמינה באפליקציה המותקנת ובאתר");
+      openDeep(c, { ai: true });
+    }
   }
 
   /* ───────── חלוניות ───────── */
@@ -402,7 +407,57 @@
   sheet.addEventListener("touchmove", (e) => { if (sy !== null && e.touches[0].clientY - sy > 90) { sy = null; closeSheet(); } }, { passive: true });
   sheet.addEventListener("touchend", () => (sy = null));
 
-  function openDeep(c) {
+  /* ───────── סקירת AI: הסבר פשוט מ-Claude (דרך פונקציית השרת explain) ───────── */
+  const AI_ERR = {
+    login_required: "סקירת AI זמינה למשתמשים מחוברים. התחברו (חינם) ונסו שוב.",
+    not_configured: "סקירת AI עוד לא הופעלה בשרת. נסו שוב בקרוב.",
+    daily_limit: "הגעתם למכסה היומית של סקירות AI. מחר יש עוד 🙂",
+    refused: "לא הצלחנו להסביר את הכרטיסייה הזו. נסו כרטיסייה אחרת.",
+    network: "אין חיבור לאינטרנט. נסו שוב."
+  };
+  function renderAI(box, d) {
+    box.innerHTML = `
+      <div class="ai-head"><span class="ai-spark" aria-hidden="true">✦</span> סקירת AI · בפשטות</div>
+      <p class="ai-one">${esc(d.oneLine)}</p>
+      ${String(d.simple || "").split(/\n+/).filter(Boolean).map((p) => `<p class="ai-p">${esc(p)}</p>`).join("")}
+      <div class="ai-sub">💡 דוגמה מהחיים</div><p class="ai-p">${esc(d.example)}</p>
+      <div class="ai-sub">🎯 למה זה חשוב לך</div><p class="ai-p">${esc(d.whyMatters)}</p>
+      ${(d.terms || []).length ? `<div class="ai-sub">📖 מילון קטן</div><dl class="ai-terms">${d.terms.map((t) => `<dt>${esc(t.term)}</dt><dd>${esc(t.meaning)}</dd>`).join("")}</dl>` : ""}
+      <p class="ai-note">נכתב בעזרת בינה מלאכותית (Claude) ועלול לטעות – המקור הוא הקובע.</p>`;
+  }
+  async function runAI(c, box) {
+    const key = "ai:" + keyOf(c);
+    const cached = store.get(key, null);
+    if (cached) return renderAI(box, cached);
+    const A = window.TovanaAuth;
+    const token = await A.getToken();
+    if (!token) {
+      box.querySelector(".ai-hint").textContent = AI_ERR.login_required;
+      return A.openLogin();
+    }
+    box.innerHTML = `<div class="ai-head"><span class="ai-spark spin" aria-hidden="true">✦</span> Claude כותב הסבר פשוט…</div>
+      <div class="skeleton"><div></div><div></div><div style="width:80%"></div><div style="width:55%"></div></div>`;
+    let res, data;
+    try {
+      res = await fetch(A.fnUrl("explain"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, apikey: A.key },
+        body: JSON.stringify({ card: { category: CAT[c.category].label, hook: c.hook, body: c.body, takeaways: c.takeaways,
+          source: `${c.source.title} / ${c.source.author}`, deep: c.deep || "" } })
+      });
+      data = await res.json();
+    } catch { data = { error: "network" }; }
+    if (!res || !res.ok || data.error) {
+      box.innerHTML = `<p class="ai-hint">${AI_ERR[data?.error] || "משהו השתבש. נסו שוב."}</p>
+        <button class="ai-btn" id="aiRetry"><span class="ai-spark" aria-hidden="true">✦</span> לנסות שוב</button>`;
+      box.querySelector("#aiRetry").onclick = () => runAI(c, box);
+      return;
+    }
+    store.set(key, data);
+    renderAI(box, data);
+  }
+
+  function openDeep(c, opts = {}) {
     const cat = CAT[c.category];
     const dir = c.lang === "en" ? ' dir="ltr"' : "";
     const links = [
@@ -415,6 +470,10 @@
       <div class="mini-src" style="color:var(--c-${c.category})">${cat.icon} ${esc(cat.label)}</div>
       <img class="deep-hero" id="deepImg" alt="" hidden />
       <h2 class="deep-hook"${isLTR(c.hook) ? ' dir="ltr"' : ""}>${esc(c.hook)}</h2>
+      ${window.TovanaAuth ? `<section class="ai-box" id="aiBox">
+        <button class="ai-btn" id="aiBtn"><span class="ai-spark" aria-hidden="true">✦</span> סקירת AI · הסבר פשוט</button>
+        <p class="ai-hint">Claude יסביר את הרעיון במילים הכי פשוטות, עם דוגמה מהחיים.</p>
+      </section>` : ""}
       <div class="deep-sec">התובנה</div>
       <p class="deep-text"${dir}>${esc(c.body)}</p>
       ${deep ? `<div class="deep-sec">הרחבה והקשר</div><p class="deep-text"${isLTR(deep) ? ' dir="ltr"' : ""}>${esc(deep)}</p>` : ""}
@@ -426,6 +485,11 @@
         ${links}
       </div>`, async (body) => {
       body.querySelector("[data-sheet-book]").onclick = () => openBook(c);
+      const aiBtn = body.querySelector("#aiBtn");
+      if (aiBtn) {
+        aiBtn.onclick = () => runAI(c, body.querySelector("#aiBox"));
+        if (opts.ai) aiBtn.click(); // נפתח מכפתור ה-AI שבכרטיסייה
+      }
       const sb = body.querySelector("[data-sheet-save]");
       sb.onclick = () => { const el = state.activeEl || document.createElement("div"); act("save", c, el); sb.textContent = state.saved[c.id] ? "✓ שמור בספרייה" : "🔖 שמירה לספרייה"; };
       const src = c.image || (c.wiki && (await window.Sources.fetchWikiImage(c.wiki)));
